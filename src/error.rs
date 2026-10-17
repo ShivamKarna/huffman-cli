@@ -1,53 +1,74 @@
+use std::error::Error;
 use std::fmt;
 use std::io;
+use std::string::FromUtf8Error;
 
-//* Erros enum
 #[derive(Debug)]
-pub enum HauffmanError {
+pub enum HuffmanError {
     Io(io::Error),
-    // user provided empty file to encode
     EmptyFile,
-    InvalidHeader,
-    // the specific string/word/letter was not valid , that could be encoded.
+    InvalidUtf8,
+    InvalidExtension { expected: &'static str },
     CorruptedData,
-    // InvalidFlag,
-    UnknownFlag, // added for flag checking
-    NoArguments, // user entered 0 arguments, means like they just ran ,"cargo run"
+    UnknownFlag(String),
+    NoArguments,
+    MissingFilename,
+    OutputExists(String),
 }
 
-impl fmt::Display for HauffmanError {
+impl fmt::Display for HuffmanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            HauffmanError::Io(err) => write!(f, "I/O Error! : {}", err),
-            HauffmanError::EmptyFile => {
-                write!(f, "Empty file was given !, Cannot compress empty file.")
+            HuffmanError::Io(e) => write!(f, "I/O error: {}", e),
+            HuffmanError::EmptyFile => write!(f, "file is empty, nothing to compress"),
+            HuffmanError::InvalidUtf8 => write!(f, "file is not valid UTF-8 text"),
+            HuffmanError::InvalidExtension { expected } => {
+                write!(f, "invalid file extension, expected '{}'", expected)
             }
-            HauffmanError::InvalidHeader => write!(
-                f,
-                "File is not valid, i.e. Should be either .hauff or .txt file"
-            ),
-
-            HauffmanError::CorruptedData => {
-                write!(f, "Failed to decompress: The byte is corrupted.")
+            HuffmanError::CorruptedData => {
+                write!(
+                    f,
+                    "failed to decompress: the file is corrupted or truncated"
+                )
             }
-            HauffmanError::UnknownFlag => write!(
+            HuffmanError::UnknownFlag(flag) => {
+                write!(f, "unknown flag '{}', use '-en' or '-den'", flag)
+            }
+            HuffmanError::NoArguments => write!(
                 f,
-                "Unknown flag used for encoding/decoding. Use '-en' or '-den'."
+                "missing arguments\nUsage:\n  cargo run -- -en <file.txt>\n  cargo run -- -den <file.en.huff>"
             ),
-            HauffmanError::NoArguments => write!(
-                f,
-                "Hauffman CLI ,Missing arguments!\nUsage:\n  cargo run -- -en <filename.txt>\n  cargo run -- -den <filename.en.hauff>"
-            ),
+            HuffmanError::MissingFilename => write!(f, "missing filename after the flag"),
+            HuffmanError::OutputExists(path) => {
+                write!(
+                    f,
+                    "output file '{}' already exists, refusing to overwrite",
+                    path
+                )
+            }
         }
     }
 }
 
-// Marked as standard rust errors
-impl std::error::Error for HauffmanError {}
+impl Error for HuffmanError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            HuffmanError::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
 
-// Impl From<io::Error for HauffmanError{}
-impl From<io::Error> for HauffmanError {
+// Lets `?` convert io::Error automatically
+impl From<io::Error> for HuffmanError {
     fn from(err: io::Error) -> Self {
-        HauffmanError::Io(err)
+        HuffmanError::Io(err)
+    }
+}
+
+// Lets `?` convert String::from_utf8 errors automatically
+impl From<FromUtf8Error> for HuffmanError {
+    fn from(_: FromUtf8Error) -> Self {
+        HuffmanError::InvalidUtf8
     }
 }
