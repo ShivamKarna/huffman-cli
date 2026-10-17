@@ -1,5 +1,6 @@
-mod error;
-mod hauffman;
+use huffman_cli::error::HuffmanError;
+use huffman_cli::{file_helpers, huffman};
+use std::error::Error;
 use std::process;
 
 enum Command<'a> {
@@ -7,44 +8,53 @@ enum Command<'a> {
     Decode { filepath: &'a str },
 }
 
-use error::HauffmanError;
-
 impl<'a> Command<'a> {
-    fn parse(args: &'a [String]) -> Result<Command<'a>, HauffmanError> {
-        match args {
-            [_, flag, filepath, ..] => match flag.as_ref() {
-                "-en" => Ok(Command::Encode { filepath }),
-                "-den" => Ok(Command::Decode { filepath }),
-                _ => Err(HauffmanError::UnknownFlag),
-            },
-            _ => Err(HauffmanError::NoArguments),
+    // args[0] = program name, args[1] = flag, args[2] = file path
+    fn parse(args: &'a [String]) -> Result<Command<'a>, HuffmanError> {
+        if args.len() < 2 {
+            return Err(HuffmanError::NoArguments);
+        }
+        if args.len() < 3 {
+            return Err(HuffmanError::MissingFilename);
+        }
+
+        let flag = args[1].as_str();
+        let filepath = args[2].as_str();
+
+        if flag == "-en" {
+            Ok(Command::Encode { filepath })
+        } else if flag == "-den" {
+            Ok(Command::Decode { filepath })
+        } else {
+            Err(HuffmanError::UnknownFlag(flag.to_string()))
         }
     }
 
-    pub fn run(self: &Self) -> Result<(), HauffmanError> {
+    fn run(self) -> Result<(), HuffmanError> {
         match self {
             Command::Encode { filepath } => {
-                if !filepath.ends_with(".txt") {
-                    println!("Error: Only '.txt' files can be Encoded!");
-                    return Err(HauffmanError::InvalidHeader);
-                }
-                println!("Encoding '{}'...", filepath);
-                let content = hauffman::read_file(filepath)?;
-                let output_path = filepath.replace(".txt", ".en.hauff");
+                let stem = filepath
+                    .strip_suffix(".txt")
+                    .ok_or(HuffmanError::InvalidExtension { expected: ".txt" })?;
+                let output_path = format!("{}.en.huff", stem);
 
-                hauffman::encode_to_file(&content, &output_path)?;
+                println!("Encoding '{}'...", filepath);
+                let content = file_helpers::read_file(filepath)?;
+                huffman::encode_to_file(&content, &output_path)?;
                 println!("Success! File encoded to: {}", output_path);
             }
 
             Command::Decode { filepath } => {
-                if !filepath.ends_with(".hauff") {
-                    println!("Error: Only '.hauff' files can be Decoded!");
-                    return Err(HauffmanError::InvalidHeader);
-                }
-                println!("Decoding '{}'...", filepath);
-                let output_path = filepath.replace(".en.hauff", ".den.hauff");
+                let stem =
+                    filepath
+                        .strip_suffix(".en.huff")
+                        .ok_or(HuffmanError::InvalidExtension {
+                            expected: ".en.huff",
+                        })?;
+                let output_path = format!("{}.dec.txt", stem);
 
-                hauffman::decode_to_file(filepath, &output_path)?;
+                println!("Decoding '{}'...", filepath);
+                huffman::decode_to_file(filepath, &output_path)?;
                 println!("Success! File decoded to: {}", output_path);
             }
         }
@@ -52,15 +62,23 @@ impl<'a> Command<'a> {
     }
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if let Err(err) = run_cmd(&args) {
-        eprintln!("{}", err);
-        process::exit(1);
-    }
-}
-
-fn run_cmd(args: &[String]) -> Result<(), HauffmanError> {
+fn run_cmd(args: &[String]) -> Result<(), HuffmanError> {
     let command = Command::parse(args)?;
     command.run()
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    if let Err(err) = run_cmd(&args) {
+        eprintln!("Error: {}", err);
+
+        // print the underlying cause too, if there is one
+        let mut cause = err.source();
+        while let Some(c) = cause {
+            eprintln!("  caused by: {}", c);
+            cause = c.source();
+        }
+        process::exit(1);
+    }
 }
