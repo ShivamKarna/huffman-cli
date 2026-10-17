@@ -8,6 +8,7 @@ repository = "https://github.com/shivamkarna/huffman-cli"
 readme = "README.md"
 keywords = ["huffman", "compression", "cli"]
 categories = ["command-line-utilities", "compression"]
+exclude = [".github/"]
 
 [[bin]]
 name = "huff"

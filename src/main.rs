@@ -1,15 +1,27 @@
+//! Command line front end for `huffman-cli`.
+//!
+//! ```text
+//! huff -en <file.txt>        writes <file>.en.huff
+//! huff -den <file.en.huff>   writes <file>.dec.txt
+//! ```
+//!
+//! This file only parses arguments and prints errors. All real work happens in
+//! the library.
+
 use huffman_cli::error::HuffmanError;
 use huffman_cli::{file_helpers, huffman};
 use std::error::Error;
 use std::process;
 
+/// A parsed command line request.
 enum Command<'a> {
     Encode { filepath: &'a str },
     Decode { filepath: &'a str },
 }
 
 impl<'a> Command<'a> {
-    // args[0] = program name, args[1] = flag, args[2] = file path
+    /// Parses `args`, where `args[0]` is the program name, `args[1]` the flag
+    /// and `args[2]` the file path.
     fn parse(args: &'a [String]) -> Result<Command<'a>, HuffmanError> {
         if args.len() < 2 {
             return Err(HuffmanError::NoArguments);
@@ -30,6 +42,8 @@ impl<'a> Command<'a> {
         }
     }
 
+    /// Runs the command and returns any error to the caller. Printing is left
+    /// to `main`, so each error is shown exactly once.
     fn run(self) -> Result<(), HuffmanError> {
         match self {
             Command::Encode { filepath } => {
@@ -73,7 +87,7 @@ fn main() {
     if let Err(err) = run_cmd(&args) {
         eprintln!("Error: {}", err);
 
-        // print the underlying cause too, if there is one
+        // Print the underlying cause too, if there is one.
         let mut cause = err.source();
         while let Some(c) = cause {
             eprintln!("  caused by: {}", c);

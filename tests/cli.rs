@@ -1,86 +1,95 @@
-use huffman_cli::error::HuffmanError;
-use huffman_cli::{file_helpers, huffman};
-use std::error::Error;
-use std::process;
+//! End to end tests that run the compiled `huff` binary.
 
-enum Command<'a> {
-    Encode { filepath: &'a str },
-    Decode { filepath: &'a str },
+use std::path::PathBuf;
+use std::process::Command;
+
+fn bin() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_huff"))
 }
 
-impl<'a> Command<'a> {
-    fn parse(args: &'a [String]) -> Result<Command<'a>, HuffmanError> {
-        if args.len() < 2 {
-            return Err(HuffmanError::NoArguments);
-        }
-        if args.len() < 3 {
-            return Err(HuffmanError::MissingFilename);
-        }
-
-        let flag = args[1].as_str();
-        let filepath = args[2].as_str();
-
-        if flag == "-en" {
-            Ok(Command::Encode { filepath })
-        } else if flag == "-den" {
-            Ok(Command::Decode { filepath })
-        } else {
-            Err(HuffmanError::UnknownFlag(flag.to_string()))
-        }
-    }
-
-    fn run(self) -> Result<(), HuffmanError> {
-        match self {
-            Command::Encode { filepath } => {
-                let stem = match filepath.strip_suffix(".txt") {
-                    Some(s) => s,
-                    None => return Err(HuffmanError::InvalidExtension { expected: ".txt" }),
-                };
-                let output_path = format!("{}.en.huff", stem);
-
-                println!("Encoding '{}'...", filepath);
-                let content = file_helpers::read_file(filepath)?;
-                huffman::encode_to_file(&content, &output_path)?;
-                println!("Success! File encoded to: {}", output_path);
-            }
-
-            Command::Decode { filepath } => {
-                let stem = match filepath.strip_suffix(".en.huff") {
-                    Some(s) => s,
-                    None => {
-                        return Err(HuffmanError::InvalidExtension {
-                            expected: ".en.huff",
-                        });
-                    }
-                };
-                let output_path = format!("{}.dec.txt", stem);
-
-                println!("Decoding '{}'...", filepath);
-                huffman::decode_to_file(filepath, &output_path)?;
-                println!("Success! File decoded to: {}", output_path);
-            }
-        }
-        Ok(())
-    }
+/// Creates a fresh scratch directory unique to this test.
+fn scratch_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("huff_cli_{}_{}", std::process::id(), name));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
 }
 
-fn run_cmd(args: &[String]) -> Result<(), HuffmanError> {
-    let command = Command::parse(args)?;
-    command.run()
+#[test]
+fn no_args_prints_usage_and_fails() {
+    let out = bin().output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("missing arguments"));
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+#[test]
+fn missing_filename_fails() {
+    let out = bin().arg("-en").output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("missing filename"));
+}
 
-    if let Err(err) = run_cmd(&args) {
-        eprintln!("Error: {}", err);
+#[test]
+fn unknown_flag_fails() {
+    let out = bin().args(["-xx", "a.txt"]).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown flag"));
+}
 
-        // print the underlying cause too, if there is one
-        let mut cause = err.source();
-        while let Some(c) = cause {
-            eprintln!("  caused by: {}", c);
-            cause = c.source();
-        }
-        process::exit(1);
-    }
+#[test]
+fn wrong_extension_fails() {
+    let out = bin().args(["-en", "notes.md"]).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("invalid file extension"));
+}
+
+#[test]
+fn missing_input_file_shows_cause() {
+    let out = bin().args(["-en", "no_such_file.txt"]).output().unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("I/O error"));
+    assert!(stderr.contains("caused by"));
+}
+
+#[test]
+fn encode_then_decode_through_the_cli() {
+    let dir = scratch_dir("roundtrip");
+
+    let txt = dir.join("note.txt");
+    std::fs::write(&txt, "abracadabra").unwrap();
+
+    let enc = bin().arg("-en").arg(&txt).output().unwrap();
+    assert!(enc.status.success());
+
+    let huff = dir.join("note.en.huff");
+    let dec = bin().arg("-den").arg(&huff).output().unwrap();
+    assert!(dec.status.success());
+
+    let decoded = std::fs::read_to_string(dir.join("note.dec.txt")).unwrap();
+    assert_eq!(decoded, "abracadabra");
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn second_encode_refuses_to_overwrite() {
+    let dir = scratch_dir("overwrite");
+
+    let txt = dir.join("note.txt");
+    std::fs::write(&txt, "hello").unwrap();
+
+    assert!(bin()
+        .arg("-en")
+        .arg(&txt)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let again = bin().arg("-en").arg(&txt).output().unwrap();
+    assert!(!again.status.success());
+    assert!(String::from_utf8_lossy(&again.stderr).contains("already exists"));
+
+    std::fs::remove_dir_all(&dir).unwrap();
 }
